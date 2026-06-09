@@ -1,0 +1,7 @@
+Params:
+  friction_step: 0.1
+  lr: 0.02
+  L: 0.02
+  I_z: 0.1
+  tau_omega: 0.1
+  tau_delta: 0.1

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "racing_env"
+version = "0.1.0"
+description = 'Car racing environments'
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["Reinforcement Learning", "Autonomous racing"]
+
+authors = [
+    {name="Grzegorz Czechmanowski", email="grzegorz.czechmanowski@put.poznan.pl"}, 
+    {name="Piotr Kicki", email="piotr.kicki@put.poznan.pl"}
+]
+maintainers = [
+    {name="Grzegorz Czechmanowski", email="grzegorz.czechmanowski@put.poznan.pl"}, 
+    {name="Piotr Kicki", email="piotr.kicki@put.poznan.pl"}
+]
+
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "torch",
+    "icecream",
+    "stable-baselines3",
+    "gymnasium>=0.28",
+    "pygame",
+    "pyyaml",
+    "wandb",
+    "click",
+    "requests",
+    "racetrack @ git+https://github.com/F1tenth-Project-Lutututu/racetrack"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["racing_env"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

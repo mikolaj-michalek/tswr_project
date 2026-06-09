@@ -1,0 +1,63 @@
+- name: "vx"
+  dim: 1
+  min_val: 0
+  max_val: 20
+  rand: 0.05
+
+- name: "vy"
+  dim: 1
+  min_val: -10
+  max_val: 10
+  rand: 0.05
+
+- name: "r"
+  dim: 1
+  min_val: -5
+  max_val: 5
+  rand: 0.05
+
+- name: "delta_history"
+  dim: 1
+  min_val: -0.4
+  max_val: 0.4
+
+
+- name: "omega_dot_history"
+  dim: 1
+  min_val: -75
+  max_val: 75
+
+- name: "omega_wheels"
+  dim: 1
+  min_val: 0
+  max_val: 10
+
+- name: "heading_diff"
+  dim: 1
+  min_val: -3.141592653589793
+  max_val: 3.141592653589793
+  rand: 0.05
+
+- name: "closest_dist"
+  dim: 1
+  min_val: -3
+  max_val: 3
+
+- name: "dist_to_edge"
+  dim: 1
+  min_val: -1
+  max_val: 1
+
+- name: "curvatures"
+  dim: 20
+  min_val: -3.141592653589793
+  max_val: 3.141592653589793
+  length: 60
+  sample_rate: 3
+
+- name: "widths"
+  dim: 20
+  min_val: 0
+  max_val: 1
+  length: 60
+  sample_rate: 3

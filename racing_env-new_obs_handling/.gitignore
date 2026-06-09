@@ -1,0 +1,12 @@
+racing_env/runs/*
+racing_env/policies/*
+racing_env/wandb/*
+racing_env_
+racing_env.egg-info
+runs
+pytorch_mppi/
+wandb
+__pycache__/
+*.py[cod]
+**/__pycache__/
+racing_env/envs/sensors/lidar_scans/icra2023_rays_1cm_1deg.npz

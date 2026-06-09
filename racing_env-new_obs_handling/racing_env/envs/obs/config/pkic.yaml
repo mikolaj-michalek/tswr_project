@@ -1,0 +1,212 @@
+- name: "v_x"
+  dim: 1
+  min_val: 0
+  max_val: 10
+  std: 0.0
+
+- name: "v_y"
+  dim: 1
+  min_val: -10
+  max_val: 10
+  std: 0.0
+
+- name: "r"
+  dim: 1
+  min_val: -5
+  max_val: 5
+  std: 0.0
+
+- name: "delta"
+  dim: 1
+  min_val: -0.5
+  max_val: 0.5
+  std: 0.0
+
+- name: "delta_ref"
+  dim: 1
+  min_val: -0.5
+  max_val: 0.5
+  std: 0.0
+
+- name: "omega_wheels"
+  dim: 1
+  min_val: 0
+  max_val: 10
+  std: 0.0
+
+- name: "omega_wheels_ref"
+  dim: 1
+  min_val: 0
+  max_val: 10
+  std: 0.0
+
+- name: "omega_wheels_ref_dot"
+  dim: 1
+  min_val: -10
+  max_val: 10
+  std: 0.0
+
+- name: "heading_diff"
+  dim: 1
+  min_val: -3.141592653589793
+  max_val: 3.141592653589793
+  std: 0.0
+
+- name: "signed_dist_to_centerline"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+
+- name: "progress"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+  transform: sin
+
+- name: "progress"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+  transform: cos
+
+- name: "progress"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+  transform: sin_x2
+
+- name: "progress"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+  transform: cos_x2
+
+- name: "progress"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+  transform: sin_x4
+
+- name: "progress"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+  transform: cos_x4
+
+- name: "min_dist_to_edge"
+  dim: 1
+  min_val: 0
+  max_val: 1
+  std: 0.0
+
+## --- Privileged observations (critic only) ---
+
+- name: "ax"
+  dim: 1
+  min_val: -25
+  max_val: 25
+  std: 0.0
+  privileged: true
+
+- name: "ay"
+  dim: 1
+  min_val: -25
+  max_val: 25
+  std: 0.0
+  privileged: true
+
+- name: "laps_finished"
+  dim: 1
+  min_val: 0
+  max_val: 10
+  std: 0.0
+  privileged: true
+
+- name: "front_tire_friction"
+  dim: 1
+  min_val: 0
+  max_val: 2
+  privileged: true
+
+- name: "rear_tire_friction"
+  dim: 1
+  min_val: 0
+  max_val: 2
+  privileged: true
+
+- name: "beta_dyn"
+  dim: 1
+  min_val: -3.141592653589793
+  max_val: 3.141592653589793
+  std: 0.0
+  privileged: true
+
+- name: "v_f"
+  dim: 1
+  min_val: 0
+  max_val: 20
+  std: 0.0
+  privileged: true
+
+- name: "Fx_f"
+  dim: 1
+  min_val: -40
+  max_val: 40
+  std: 0.0
+  privileged: true
+
+- name: "Fx_r"
+  dim: 1
+  min_val: -40
+  max_val: 40
+  std: 0.0
+  privileged: true
+
+- name: "Fy_f"
+  dim: 1
+  min_val: -40
+  max_val: 40
+  std: 0.0
+  privileged: true
+
+- name: "Fy_r"
+  dim: 1
+  min_val: -40
+  max_val: 40
+  std: 0.0
+  privileged: true
+
+- name: "alpha_f"
+  dim: 1
+  min_val: -1.5707963267948966
+  max_val: 1.5707963267948966
+  std: 0.0
+  privileged: true
+
+- name: "alpha_r"
+  dim: 1
+  min_val: -1.5707963267948966
+  max_val: 1.5707963267948966
+  std: 0.0
+  privileged: true
+
+- name: "slip_ratio_f"
+  dim: 1
+  min_val: -2
+  max_val: 2
+  std: 0.0
+  privileged: true
+
+- name: "slip_ratio_r"
+  dim: 1
+  min_val: -2
+  max_val: 2
+  std: 0.0
+  privileged: true

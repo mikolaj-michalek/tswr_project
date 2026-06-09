@@ -1,0 +1,91 @@
+- name: "v_x"
+  dim: 1
+  min_val: 0
+  max_val: 20
+  std: 0.0
+
+- name: "v_y"
+  dim: 1
+  min_val: -10
+  max_val: 10
+  std: 0.0
+
+- name: "r"
+  dim: 1
+  min_val: -5
+  max_val: 5
+  std: 0.0
+
+- name: "delta"
+  dim: 1
+  min_val: -0.4
+  max_val: 0.4
+  std: 0.0
+
+- name: "delta_ref"
+  dim: 1
+  min_val: -0.4
+  max_val: 0.4
+  std: 0.0
+
+- name: "omega_wheels"
+  dim: 1
+  min_val: 0
+  max_val: 10
+  std: 0.0
+
+- name: "omega_wheels_ref"
+  dim: 1
+  min_val: 0
+  max_val: 10
+  std: 0.0
+
+- name: "omega_wheels_ref_dot"
+  dim: 1
+  min_val: -10
+  max_val: 10
+  std: 0.0
+
+- name: "heading_diff"
+  dim: 1
+  min_val: -3.141592653589793
+  max_val: 3.141592653589793
+  std: 0.0
+
+- name: "signed_dist_to_centerline"
+  dim: 1
+  min_val: -3
+  max_val: 3
+  std: 0.0
+
+- name: "progress"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+  transform: sin
+
+- name: "progress"
+  dim: 1
+  min_val: -1
+  max_val: 1
+  std: 0.0
+  transform: cos
+
+- name: "tire_dists_to_edge"
+  dim: 4
+  min_val: -3
+  max_val: 3
+  std: 0.0
+
+- name: "front_tire_friction"
+  dim: 1
+  min_val: 0
+  max_val: 2
+  privileged: true
+
+- name: "rear_tire_friction"
+  dim: 1
+  min_val: 0
+  max_val: 2
+  privileged: true

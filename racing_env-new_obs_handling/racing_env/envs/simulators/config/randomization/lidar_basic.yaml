@@ -1,0 +1,7 @@
+Params:
+  friction: 0.02
+Obs:
+  additive_std:
+    progres_cos: 0.1
+  # bias_std:
+  #   progres_cos: 0.02

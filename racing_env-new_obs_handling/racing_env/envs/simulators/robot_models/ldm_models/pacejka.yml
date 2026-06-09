@@ -1,0 +1,4 @@
+system: f1tenth
+dynamics_model_type: pacejka_single_track
+state_extender: null
+model_path: ./pacejka_single_track_None_gc0.01_lr0.005_hf100_100_hb100_str2_euler_nn32_seed0.pt

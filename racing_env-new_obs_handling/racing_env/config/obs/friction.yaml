@@ -1,0 +1,6 @@
+- name: "friction"
+  dim: 10
+  min_val: 0
+  max_val: 2
+  length: 100
+  sample_rate: 10

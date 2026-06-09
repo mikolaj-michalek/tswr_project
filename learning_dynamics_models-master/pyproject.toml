@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "learning_dynamics_models"
+description = "Learning dynamics models"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Piotr Kicki", email = "piotr.kicki@put.poznan.pl" },
+]
+maintainers = [
+    { name = "Piotr Kicki", email = "piotr.kicki@put.poznan.pl" },
+]
+keywords = ["Machine Learning", "Dynamics"]
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "torch",
+    "pandas",
+    "pyyaml",
+    "wandb",
+    "tensorboard",
+    "experiment_launcher",
+]
+dynamic = ["version"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ldm"]
+
+[tool.hatch.version]
+path = "ldm/__init__.py"

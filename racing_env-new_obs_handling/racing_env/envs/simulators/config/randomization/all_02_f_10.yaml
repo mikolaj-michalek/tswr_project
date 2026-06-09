@@ -1,0 +1,36 @@
+Params:
+  friction: 0.3
+  m: 0.02
+  g: 0.02
+  I_z: 0.02
+  L: 0.02
+  lr: 0.02
+  Cd0: 0.02
+  Cd1: 0.02
+  Cd2: 0.02
+  tire: 0.02
+Obs:
+  additive_std:
+    omega_wheels: 0.1
+    v_x: 0.2
+    v_y: 0.1
+    r: 0.05
+  bias_std:
+    delta: 0.02
+
+
+
+# observation_names = [
+#     "episode_progress",
+#     "progres_sin",
+#     "progres_cos",
+#     "signed_dist_to_centerline",
+#     "signed_dist_to_edge",
+#     "heading_diff",
+#     "v_x",
+#     "v_y",
+#     "r",
+#     "omega_wheels",
+#     "omega_wheels_ref",
+#     "delta",
+# ]
