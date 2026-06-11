@@ -84,12 +84,17 @@ class SceneRenderer:
         self.track_min_y = np.min(self.track.y).item()
         self.track_max_y = np.max(self.track.y).item()
 
-        self.screen_width = int((self.track_max_x - (self.track_min_x) + 2) * self.scale)
-        self.screen_height = int((self.track_max_y - (self.track_min_y) + 2) * self.scale)
+        # ML
+        #self.screen_width = int((self.track_max_x - (self.track_min_x) + 2) * self.scale)
+        #self.screen_height = int((self.track_max_y - (self.track_min_y) + 2) * self.scale)
+        self.screen_width = 2500
+        self.screen_height = 800
 
+        # ML
         # add pading to the track
-        self.track_min_x -= 1
-        self.track_min_y -= 1
+        self.track_min_x -= 2.5
+        self.track_min_y -= 2.5
+
 
         self._track_surface = None
         self._rendering_started = False

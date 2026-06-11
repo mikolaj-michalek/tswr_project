@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "racetrack"
+dynamic = ["version"]
+authors = [
+    {name="Grzegorz Czechmanowski", email="grzegorz.czechmanowski@ideas.edu.pl"},
+    {name="Piotr Kicki", email="piotr.kicki@ideas.edu.pl"},
+    {name="Jan Węgrzynowski", email="jan.wegrzynowski@ideas.edu.pl"}
+]
+maintainers = [
+    {name="Grzegorz Czechmanowski", email="grzegorz.czechmanowski@ideas.edu.pl"},
+    {name="Piotr Kicki", email="piotr.kicki@ideas.edu.pl"},
+    {name="Jan Węgrzynowski", email="jan.wegrzynowski@ideas.edu.pl"}
+]
+description = 'Python package that allow one to load racetrack and interact with it.'
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["Racetrack", "Autonomous racing"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "scipy",
+    "numpy",
+    "matplotlib",
+]
+
+# --- Hatchling Specific Configuration ---
+
+[tool.hatch.version]
+path = "racetrack/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["racetrack"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# This ensures your 'tracks' folder is included in the installation
+"racetrack/tracks" = "racetrack/tracks"
