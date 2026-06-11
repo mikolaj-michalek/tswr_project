@@ -15,7 +15,9 @@ class ZeroInitializer(InitializerInterface):
         if start_at_zero:
             start_idx = torch.zeros(self.env.num_envs, dtype=torch.int64, device=dev)
         else:
-            start_idx = (torch.rand(self.env.num_envs, device=dev) * self.env.track_size).int()
+            # ML
+            #start_idx = (torch.rand(self.env.num_envs, device=dev) * self.env.track_size).int()
+            start_idx = torch.ones(self.env.num_envs, dtype=torch.int64, device=dev) * 8
 
         start_x = self.env.track_x[self.batch_idx, start_idx]
         start_y = self.env.track_y[self.batch_idx, start_idx]

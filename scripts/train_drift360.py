@@ -94,7 +94,7 @@ def main():
     )
 
     model.learn(
-        total_timesteps=500_000,
+        total_timesteps=5_000_000,
         callback=checkpoint_callback,
         tb_log_name="ppo_drift360",
     )

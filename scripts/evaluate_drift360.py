@@ -34,7 +34,7 @@ def main():
         learned_model_config="racing_env-new_obs_handling/racing_env/envs/simulators/robot_models/ldm_models/pacejka.yml",
         reward_type="drift360",
         observation_config="basic",
-        initializer="random",
+        initializer="zero",
         compile=False,
     )
 
