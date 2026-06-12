@@ -6,7 +6,7 @@ import racing_env
 from stable_baselines3 import PPO
 
 
-MODEL_PATH = "models/drift360/ppo_drift360_500000_steps"
+MODEL_PATH = "models/drift360_phase3/ppo_drift360_phase3_625000_steps"
 # MODEL_PATH = "models/drift360/ppo_drift360_final"
 
 TRACK = "ml_track"
