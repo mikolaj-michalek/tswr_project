@@ -3,65 +3,124 @@ import torch
 
 
 class Drift360Reward:
+    """
+    Prostszy reward do driftu 360.
+
+    Idea:
+    - DRIVE: rozpędź się i trzymaj tor.
+    - DRIFT: po osiągnięciu prędkości nagradzaj każdy przyrost yaw + poślizg boczny.
+    - RECOVER: po 360 stopniach nagradzaj wyprostowanie auta i dalszą jazdę.
+
+    Najważniejsze debugowe pola:
+    - self.phase: 0=DRIVE, 1=DRIFT, 2=RECOVER
+    - self.yaw_sum: skumulowany obrót w radianach podczas driftu
+    - self.last_debug_info: słownik do podejrzenia w evaluacji
+    """
+
     DRIVE = 0
-    SPIN = 1
+    DRIFT = 1
     RECOVER = 2
+
+    PHASE_NAMES = {
+        DRIVE: "DRIVE",
+        DRIFT: "DRIFT",
+        RECOVER: "RECOVER",
+    }
 
     def __init__(
         self,
         env,
         yaw_target=2.0 * math.pi,
-        min_spin_speed=5.0,
-        curvature_threshold=0.12,
-        max_spin_steps=110,
-        cooldown_steps=140,
+        min_start_speed=4.0,
+        min_drift_speed=2.0,
+        max_drift_steps=260,
+        max_recover_steps=100,
+        curvature_threshold=0.25,
+        debug=True,
     ):
         self.env = env
         self.yaw_target = yaw_target
-        self.min_spin_speed = min_spin_speed
+        self.min_start_speed = min_start_speed
+        self.min_drift_speed = min_drift_speed
+        self.max_drift_steps = max_drift_steps
+        self.max_recover_steps = max_recover_steps
         self.curvature_threshold = curvature_threshold
-        self.max_spin_steps = max_spin_steps
-        self.cooldown_steps = cooldown_steps
+        self.debug = debug
 
-        self.prev_yaw = torch.zeros(env.num_envs, device=env.device)
-        self.yaw_sum = torch.zeros(env.num_envs, device=env.device)
-        self.prev_yaw_sum = torch.zeros(env.num_envs, device=env.device)
+        n = env.num_envs
+        device = env.device
 
-        self.phase = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
-        self.initialized = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        self.prev_yaw = torch.zeros(n, device=device)
+        self.yaw_sum = torch.zeros(n, device=device)
+        self.prev_yaw_abs = torch.zeros(n, device=device)
+        self.initialized = torch.zeros(n, dtype=torch.bool, device=device)
 
-        self.spin_steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
-        self.recover_steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
-        self.cooldown = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+        self.phase = torch.zeros(n, dtype=torch.long, device=device)
+        self.drift_steps = torch.zeros(n, dtype=torch.long, device=device)
+        self.recover_steps = torch.zeros(n, dtype=torch.long, device=device)
+
+        self.best_yaw_abs = torch.zeros(n, device=device)
+        self.last_debug_info = {}
 
     def _reset_internal_state(self):
-        if hasattr(self.env, "steps"):
-            reset_mask = self.env.steps <= 1
+        if not hasattr(self.env, "steps"):
+            return
 
-            self.prev_yaw = torch.where(reset_mask, torch.zeros_like(self.prev_yaw), self.prev_yaw)
-            self.yaw_sum = torch.where(reset_mask, torch.zeros_like(self.yaw_sum), self.yaw_sum)
-            self.prev_yaw_sum = torch.where(reset_mask, torch.zeros_like(self.prev_yaw_sum), self.prev_yaw_sum)
-            self.phase = torch.where(reset_mask, torch.zeros_like(self.phase), self.phase)
-            self.initialized = torch.where(reset_mask, torch.zeros_like(self.initialized), self.initialized)
-            self.spin_steps = torch.where(reset_mask, torch.zeros_like(self.spin_steps), self.spin_steps)
-            self.recover_steps = torch.where(reset_mask, torch.zeros_like(self.recover_steps), self.recover_steps)
-            self.cooldown = torch.where(reset_mask, torch.zeros_like(self.cooldown), self.cooldown)
+        reset = self.env.steps <= 1
+        self.prev_yaw = torch.where(reset, torch.zeros_like(self.prev_yaw), self.prev_yaw)
+        self.yaw_sum = torch.where(reset, torch.zeros_like(self.yaw_sum), self.yaw_sum)
+        self.prev_yaw_abs = torch.where(reset, torch.zeros_like(self.prev_yaw_abs), self.prev_yaw_abs)
+        self.initialized = torch.where(reset, torch.zeros_like(self.initialized), self.initialized)
+        self.phase = torch.where(reset, torch.zeros_like(self.phase), self.phase)
+        self.drift_steps = torch.where(reset, torch.zeros_like(self.drift_steps), self.drift_steps)
+        self.recover_steps = torch.where(reset, torch.zeros_like(self.recover_steps), self.recover_steps)
+        self.best_yaw_abs = torch.where(reset, torch.zeros_like(self.best_yaw_abs), self.best_yaw_abs)
 
     def _straight_gate(self):
         batch_idx = self.env._batch_idx
         closest_idx = self.env.closest_idx
-        local_curvature = torch.abs(self.env.track_curvature[batch_idx, closest_idx])
+        curvature = torch.abs(self.env.track_curvature[batch_idx, closest_idx])
+        return curvature < self.curvature_threshold
 
-        on_straight = local_curvature < self.curvature_threshold
-        aligned = torch.abs(self.env.heading_diff) < 0.55
+    def _save_debug_info(self, speed, beta, r, dyaw, progress, reward):
+        self.last_debug_info = {
+            "phase": self.phase.detach().cpu().tolist(),
+            "phase_name": [self.PHASE_NAMES[int(p)] for p in self.phase.detach().cpu().tolist()],
+            "yaw_deg": (torch.abs(self.yaw_sum) * 180.0 / math.pi).detach().cpu().tolist(),
+            "best_yaw_deg": (self.best_yaw_abs * 180.0 / math.pi).detach().cpu().tolist(),
+            "speed": speed.detach().cpu().tolist(),
+            "beta_deg": (torch.abs(beta) * 180.0 / math.pi).detach().cpu().tolist(),
+            "r": torch.abs(r).detach().cpu().tolist(),
+            "dyaw_deg": (torch.abs(dyaw) * 180.0 / math.pi).detach().cpu().tolist(),
+            "progress": progress.detach().cpu().tolist(),
+            "reward": reward.detach().cpu().tolist(),
+            "drift_steps": self.drift_steps.detach().cpu().tolist(),
+            "recover_steps": self.recover_steps.detach().cpu().tolist(),
+        }
 
-        return on_straight & aligned
+    def _debug_print(self):
+        if not self.debug or not hasattr(self.env, "steps"):
+            return
+        step = int(self.env.steps[0].item())
+        if step % 50 != 0:
+            return
+        info = self.last_debug_info
+        print(
+            f"[REWARD] step={step:04d} | "
+            f"phase={info['phase_name'][0]} | "
+            f"yaw={info['yaw_deg'][0]:.1f} deg | "
+            f"best={info['best_yaw_deg'][0]:.1f} deg | "
+            f"v={info['speed'][0]:.2f} | "
+            f"beta={info['beta_deg'][0]:.1f} deg | "
+            f"r={info['r'][0]:.2f} | "
+            f"rew={info['reward'][0]:+.3f}"
+        )
 
     def __call__(self):
         self._reset_internal_state()
+        old_phase = self.phase.clone()
 
         state = self.env.state
-
         yaw = state[:, 2]
         v_x = state[:, 3]
         v_y = state[:, 4]
@@ -75,208 +134,143 @@ class Drift360Reward:
         dyaw = torch.atan2(torch.sin(dyaw), torch.cos(dyaw))
         self.prev_yaw = yaw.clone()
 
-        abs_dyaw = torch.abs(dyaw)
-
         speed = torch.sqrt(v_x ** 2 + v_y ** 2)
         beta = torch.atan2(v_y, torch.clamp(torch.abs(v_x), min=0.1))
+
         abs_beta = torch.abs(beta)
         abs_r = torch.abs(r)
-
+        abs_dyaw = torch.abs(dyaw)
+        abs_delta = torch.abs(delta)
+        abs_center = torch.abs(self.env.signed_dist_to_centerline)
+        abs_heading = torch.abs(self.env.heading_diff)
         progress = self.env.progress / self.env.dt
         straight = self._straight_gate()
 
-        self.cooldown = torch.clamp(self.cooldown - 1, min=0)
-
-        # ============================================================
-        # DRIVE: jazda + rozpędzenie na prostej
-        # ============================================================
+        # ------------------------------------------------------------
+        # DRIVE: ma się rozpędzić, ale nie dostawać za dużo za samą jazdę.
+        # ------------------------------------------------------------
         drive_reward = (
-            1.00 * progress
-            - 0.35 * torch.abs(self.env.signed_dist_to_centerline)
-            - 0.35 * torch.abs(self.env.heading_diff)
-            - 0.02 * torch.abs(delta)
+            0.35 * progress
+            + 0.18 * torch.clamp(speed - 2.0, 0.0, 8.0)
+            - 0.20 * abs_center
+            - 0.12 * abs_heading
         )
 
-        # mocniej premiujemy przygotowanie prędkości na prostej
-        straight_speed_bonus = torch.where(
-            straight,
-            0.75 * torch.clamp(speed - 3.0, 0.0, 8.0),
-            torch.zeros_like(speed),
-        )
-
-        drive_reward = drive_reward + straight_speed_bonus
-
-        can_start_spin = (
+        start_drift = (
             (self.phase == self.DRIVE)
             & straight
-            & (speed > self.min_spin_speed)
-            & (self.cooldown == 0)
+            & (speed > self.min_start_speed)
         )
 
-        self.phase = torch.where(
-            can_start_spin,
-            torch.ones_like(self.phase) * self.SPIN,
-            self.phase,
+        self.phase = torch.where(start_drift, torch.ones_like(self.phase) * self.DRIFT, self.phase)
+        self.yaw_sum = torch.where(start_drift, torch.zeros_like(self.yaw_sum), self.yaw_sum)
+        self.prev_yaw_abs = torch.where(start_drift, torch.zeros_like(self.prev_yaw_abs), self.prev_yaw_abs)
+        self.drift_steps = torch.where(start_drift, torch.zeros_like(self.drift_steps), self.drift_steps)
+
+        # ------------------------------------------------------------
+        # DRIFT: najważniejsze jest ciągłe dokładanie yaw.
+        # Brak osobnej fazy INITIATE zmniejsza ryzyko, że model utknie
+        # w krótkich szarpnięciach zamiast wejść w długi poślizg.
+        # ------------------------------------------------------------
+        in_drift = self.phase == self.DRIFT
+        self.prev_yaw_abs = torch.where(in_drift, torch.abs(self.yaw_sum), self.prev_yaw_abs)
+        self.yaw_sum = torch.where(in_drift, self.yaw_sum + dyaw, self.yaw_sum)
+        yaw_abs = torch.abs(self.yaw_sum)
+        self.best_yaw_abs = torch.maximum(self.best_yaw_abs, yaw_abs)
+        self.drift_steps = torch.where(in_drift, self.drift_steps + 1, self.drift_steps)
+
+        yaw_delta_abs = torch.relu(yaw_abs - self.prev_yaw_abs)
+        yaw_frac = torch.clamp(yaw_abs / self.yaw_target, 0.0, 1.0)
+
+        # reward gęsty: każda kolejna porcja obrotu daje kasę,
+        # a im bliżej 360, tym większa wartość kolejnych stopni.
+        yaw_reward = 30.0 * yaw_delta_abs * (1.0 + 2.0 * yaw_frac)
+
+        # nagroda za faktyczny poślizg boczny, ale bez zachęcania do stania w miejscu.
+        beta_reward = 1.2 * torch.clamp(abs_beta - 0.08, 0.0, 0.7)
+        rotation_reward = 0.45 * torch.clamp(abs_r, 0.0, 5.0)
+        speed_keep_reward = 0.20 * torch.clamp(speed, 0.0, 8.0)
+
+        drift_reward = (
+            yaw_reward
+            + beta_reward
+            + rotation_reward
+            + speed_keep_reward
+            - 0.18 * abs_center
+            - 0.015 * abs_delta
         )
 
-        self.yaw_sum = torch.where(can_start_spin, torch.zeros_like(self.yaw_sum), self.yaw_sum)
-        self.prev_yaw_sum = torch.where(can_start_spin, torch.zeros_like(self.prev_yaw_sum), self.prev_yaw_sum)
-        self.spin_steps = torch.where(can_start_spin, torch.zeros_like(self.spin_steps), self.spin_steps)
+        # nie karz za mały progress tak mocno jak wcześniej, bo 360 naturalnie
+        # zmniejsza postęp wzdłuż toru. Karz głównie za niemal zatrzymanie.
+        too_slow = in_drift & (self.drift_steps > 20) & (speed < self.min_drift_speed)
+        drift_reward = torch.where(too_slow, drift_reward - 6.0, drift_reward)
 
-        # ============================================================
-        # SPIN: uproszczony reward — liczy się dokończenie obrotu
-        # ============================================================
-        in_spin = self.phase == self.SPIN
+        failed_drift = in_drift & (self.drift_steps > self.max_drift_steps)
+        drift_reward = torch.where(failed_drift, drift_reward - 10.0, drift_reward)
 
-        self.prev_yaw_sum = torch.where(in_spin, self.yaw_sum, self.prev_yaw_sum)
-        self.yaw_sum = torch.where(in_spin, self.yaw_sum + abs_dyaw, self.yaw_sum)
-        self.spin_steps = torch.where(in_spin, self.spin_steps + 1, self.spin_steps)
+        finished_drift = in_drift & (yaw_abs >= self.yaw_target)
+        drift_reward = torch.where(finished_drift, drift_reward + 80.0, drift_reward)
 
-        yaw_fraction = torch.clamp(self.yaw_sum / self.yaw_target, 0.0, 1.0)
-        prev_yaw_fraction = torch.clamp(self.prev_yaw_sum / self.yaw_target, 0.0, 1.0)
+        self.phase = torch.where(finished_drift, torch.ones_like(self.phase) * self.RECOVER, self.phase)
+        self.phase = torch.where(failed_drift | too_slow, torch.zeros_like(self.phase), self.phase)
+        self.recover_steps = torch.where(finished_drift, torch.zeros_like(self.recover_steps), self.recover_steps)
 
-        # mocno nieliniowy progres: 90 stopni mało warte, końcówka dużo warta
-        yaw_stage_reward = 90.0 * (yaw_fraction ** 3 - prev_yaw_fraction ** 3)
-
-        # milestone bonusy pomagają PPO zauważyć 180/270/360
-        passed_180 = (prev_yaw_fraction < 0.50) & (yaw_fraction >= 0.50)
-        passed_270 = (prev_yaw_fraction < 0.75) & (yaw_fraction >= 0.75)
-
-        milestone_bonus = torch.zeros_like(speed)
-        milestone_bonus = torch.where(passed_180, milestone_bonus + 12.0, milestone_bonus)
-        milestone_bonus = torch.where(passed_270, milestone_bonus + 25.0, milestone_bonus)
-
-        spin_reward = (
-            yaw_stage_reward
-            + milestone_bonus
-            + 0.08 * progress
-            + 0.12 * torch.clamp(speed, 0.0, 10.0)
-            + 0.12 * torch.clamp(abs_beta, 0.0, 1.3)
-            - 0.20 * torch.abs(self.env.signed_dist_to_centerline)
-        )
-
-        failed_spin = (
-            in_spin
-            & (
-                (self.spin_steps > self.max_spin_steps)
-                | ((speed < 2.0) & (self.spin_steps > 15))
-                | ((self.yaw_sum < 0.35 * self.yaw_target) & (self.spin_steps > 45))
-            )
-        )
-
-        finished_spin = in_spin & (self.yaw_sum >= self.yaw_target)
-
-        spin_reward = torch.where(
-            failed_spin,
-            spin_reward - 55.0,
-            spin_reward,
-        )
-
-        spin_reward = torch.where(
-            finished_spin,
-            spin_reward + 130.0,
-            spin_reward,
-        )
-
-        self.phase = torch.where(
-            finished_spin,
-            torch.ones_like(self.phase) * self.RECOVER,
-            self.phase,
-        )
-
-        self.phase = torch.where(
-            failed_spin,
-            torch.zeros_like(self.phase),
-            self.phase,
-        )
-
-        self.cooldown = torch.where(
-            failed_spin,
-            torch.ones_like(self.cooldown) * self.cooldown_steps,
-            self.cooldown,
-        )
-
-        self.recover_steps = torch.where(
-            finished_spin,
-            torch.zeros_like(self.recover_steps),
-            self.recover_steps,
-        )
-
-        overspin = torch.nn.functional.relu(self.yaw_sum - 2.25 * math.pi)
-        spin_reward = spin_reward - 5.0 * overspin
-
-        # ============================================================
-        # RECOVER: po 360 trzeba odzyskać kontrolę
-        # ============================================================
+        # ------------------------------------------------------------
+        # RECOVER: wyprostuj i jedź dalej.
+        # ------------------------------------------------------------
         in_recover = self.phase == self.RECOVER
-
-        self.recover_steps = torch.where(
-            in_recover,
-            self.recover_steps + 1,
-            self.recover_steps,
-        )
+        self.recover_steps = torch.where(in_recover, self.recover_steps + 1, self.recover_steps)
 
         recover_reward = (
-            1.20 * progress
+            0.80 * progress
             + 0.20 * torch.clamp(speed, 0.0, 8.0)
-            - 1.00 * torch.abs(self.env.heading_diff)
-            - 0.65 * abs_r
-            - 0.40 * abs_beta
-            - 0.30 * torch.abs(self.env.signed_dist_to_centerline)
+            - 0.90 * abs_heading
+            - 0.55 * abs_r
+            - 0.35 * abs_beta
+            - 0.25 * abs_center
         )
 
-        stable_after_spin = (
+        stable = (
             in_recover
-            & (self.recover_steps > 20)
-            & (torch.abs(self.env.heading_diff) < 0.35)
-            & (abs_r < 0.9)
-            & (speed > 2.8)
+            & (self.recover_steps > 15)
+            & (abs_heading < 0.45)
+            & (abs_r < 1.0)
+            & (abs_beta < 0.25)
+            & (speed > 2.0)
         )
+        failed_recover = in_recover & (self.recover_steps > self.max_recover_steps)
 
-        recover_reward = torch.where(
-            stable_after_spin,
-            recover_reward + 50.0,
-            recover_reward,
-        )
+        recover_reward = torch.where(stable, recover_reward + 35.0, recover_reward)
+        recover_reward = torch.where(failed_recover, recover_reward - 8.0, recover_reward)
 
-        self.phase = torch.where(
-            stable_after_spin,
-            torch.zeros_like(self.phase),
-            self.phase,
-        )
+        self.phase = torch.where(stable | failed_recover, torch.zeros_like(self.phase), self.phase)
 
-        self.cooldown = torch.where(
-            stable_after_spin,
-            torch.ones_like(self.cooldown) * self.cooldown_steps,
-            self.cooldown,
-        )
+        reset = failed_drift | too_slow | stable | failed_recover
+        self.yaw_sum = torch.where(reset, torch.zeros_like(self.yaw_sum), self.yaw_sum)
+        self.prev_yaw_abs = torch.where(reset, torch.zeros_like(self.prev_yaw_abs), self.prev_yaw_abs)
+        self.drift_steps = torch.where(reset, torch.zeros_like(self.drift_steps), self.drift_steps)
+        self.recover_steps = torch.where(reset, torch.zeros_like(self.recover_steps), self.recover_steps)
 
-        reset_spin_state = stable_after_spin | failed_spin
-
-        self.yaw_sum = torch.where(reset_spin_state, torch.zeros_like(self.yaw_sum), self.yaw_sum)
-        self.prev_yaw_sum = torch.where(reset_spin_state, torch.zeros_like(self.prev_yaw_sum), self.prev_yaw_sum)
-        self.spin_steps = torch.where(reset_spin_state, torch.zeros_like(self.spin_steps), self.spin_steps)
-
-        # ============================================================
-        # wybór rewardu
-        # ============================================================
-        reward = torch.where(in_spin, spin_reward, drive_reward)
+        reward = torch.where(in_drift, drift_reward, drive_reward)
         reward = torch.where(in_recover, recover_reward, reward)
 
-        slightly_off_track_penalty = (
-            -5.0 * torch.nn.functional.relu(-self.env.signed_dist_to_edge + 0.05) ** 2.0
-        )
+        reward = torch.where(self.env.slightly_off_track, reward - 2.0, reward)
+        reward = torch.where(self.env.off_track, torch.ones_like(reward) * -30.0, reward)
 
-        reward = torch.where(
-            self.env.slightly_off_track,
-            reward + slightly_off_track_penalty,
-            reward,
-        )
+        reward = reward / 10.0
+        self._save_debug_info(speed, beta, r, dyaw, progress, reward)
+        self._debug_print()
 
-        reward = torch.where(
-            self.env.off_track,
-            torch.ones_like(reward) * -35.0,
-            reward,
-        )
+        if self.debug and torch.any(old_phase != self.phase):
+            for idx in torch.where(old_phase != self.phase)[0][:5]:
+                i = int(idx.item())
+                print(
+                    f"[PHASE] env={i} "
+                    f"{self.PHASE_NAMES[int(old_phase[i].item())]} -> {self.PHASE_NAMES[int(self.phase[i].item())]} | "
+                    f"yaw={self.last_debug_info['yaw_deg'][i]:.1f} deg | "
+                    f"best={self.last_debug_info['best_yaw_deg'][i]:.1f} deg | "
+                    f"v={self.last_debug_info['speed'][i]:.2f} | "
+                    f"beta={self.last_debug_info['beta_deg'][i]:.1f} deg"
+                )
 
-        return reward / 10.0
+        return reward
