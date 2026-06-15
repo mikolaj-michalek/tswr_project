@@ -5,7 +5,12 @@ import racing_env
 
 from stable_baselines3 import PPO
 
-MODEL_PATH = "models/drift360_phase5/ppo_drift360_phase5_150000_steps"
+# TEST
+# MODEL_PATH = "models/drift360_phase6/test_ppo_drift360_phase6_150000_steps" 
+# MODEL_PATH = "models/drift360_phase4/test_ppo_drift360_phase4_1050000_steps"
+
+# BEST
+MODEL_PATH = "models/drift360_phase6/best_ppo_drift360_phase6_300000_steps"  
 TRACK = "ml_track"
 
 
@@ -21,9 +26,6 @@ def wrap_action(action):
 
 
 def get_reward_debug(env):
-    """
-    Próbuje dobrać się do obiektu rewardu w różnych wariantach env.
-    """
     candidates = [
         getattr(env, "reward", None),
         getattr(env, "reward_fn", None),
@@ -42,7 +44,6 @@ def get_reward_debug(env):
             if c is not None and hasattr(c, "last_debug_info"):
                 return c.last_debug_info
 
-    # awaryjnie: przeszukaj atrybuty env
     for name in dir(env):
         try:
             obj = getattr(env, name)

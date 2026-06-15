@@ -6,12 +6,10 @@ import racing_env
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 
+MODEL_DIR = "models/drift360_phase6"
+LOG_DIR = "logs/drift360_phase6"
 
-MODEL_DIR = "models/drift360_phase5"
-LOG_DIR = "logs/drift360_phase5"
-
-#LOAD_MODEL_PATH = "models/drift360_phase4/ppo_drift360_phase4_4350000_steps"
-
+#LOAD_MODEL_PATH = "models/drift360_phase6/ppo_drift360_phase6_400000_steps"  # Set to None to train from scratch
 
 class SingleVecToGymWrapper(gym.Env):
     def __init__(self, vec_env):
@@ -81,8 +79,12 @@ def main():
     checkpoint_callback = CheckpointCallback(
         save_freq=25_000,
         save_path=MODEL_DIR,
-        name_prefix="ppo_drift360_phase5",
+        name_prefix="ppo_drift360_phase6",
     )
+
+    # ------------------------------------------------------
+    #                       CREATE
+    # ------------------------------------------------------
 
     model = PPO(
         policy="MultiInputPolicy",
@@ -100,6 +102,10 @@ def main():
         device="cpu",
     )
 
+    # ------------------------------------------------------
+    #                       LOAD
+    # ------------------------------------------------------
+
     # model = PPO.load(
     #     LOAD_MODEL_PATH,
     #     env=env,
@@ -110,13 +116,12 @@ def main():
     model.learn(
         total_timesteps=5_000_000,
         callback=checkpoint_callback,
-        tb_log_name="ppo_drift360_phase5",
+        tb_log_name="ppo_drift360_phase6",
         reset_num_timesteps=False,
     )
 
-    model.save(os.path.join(MODEL_DIR, "ppo_drift360_phase5_final"))
+    model.save(os.path.join(MODEL_DIR, "ppo_drift360_phase6_final"))
     env.close()
-
 
 if __name__ == "__main__":
     main()

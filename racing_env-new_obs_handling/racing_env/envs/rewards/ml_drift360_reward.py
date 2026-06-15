@@ -1,30 +1,32 @@
+# ------------------------------------------------------------------------------
+#                                   PHASE 6
+# ------------------------------------------------------------------------------
+
 import math
 import torch
 
 
 class Drift360Reward:
     """
-    Prostszy reward do driftu 360.
+    Reward do driftu 360.
 
-    Idea:
-    - DRIVE: rozpędź się i trzymaj tor.
-    - DRIFT: po osiągnięciu prędkości nagradzaj każdy przyrost yaw + poślizg boczny.
-    - RECOVER: po 360 stopniach nagradzaj wyprostowanie auta i dalszą jazdę.
-
-    Najważniejsze debugowe pola:
-    - self.phase: 0=DRIVE, 1=DRIFT, 2=RECOVER
-    - self.yaw_sum: skumulowany obrót w radianach podczas driftu
-    - self.last_debug_info: słownik do podejrzenia w evaluacji
+    Fazy:
+    - DRIVE: rozpędź się i trzymaj tor
+    - DRIFT: wykonaj pierwszy obrót 360
+    - RECOVER: wyprostuj auto po obrocie
+    - FINISH: po pierwszym 360 jedź już tylko po torze do końca epizodu
     """
 
     DRIVE = 0
     DRIFT = 1
     RECOVER = 2
+    FINISH = 3
 
     PHASE_NAMES = {
         DRIVE: "DRIVE",
         DRIFT: "DRIFT",
         RECOVER: "RECOVER",
+        FINISH: "FINISH",
     }
 
     def __init__(
@@ -60,6 +62,8 @@ class Drift360Reward:
         self.recover_steps = torch.zeros(n, dtype=torch.long, device=device)
 
         self.best_yaw_abs = torch.zeros(n, device=device)
+        self.finished_once = torch.zeros(n, dtype=torch.bool, device=device)
+
         self.last_debug_info = {}
 
     def _reset_internal_state(self):
@@ -67,14 +71,18 @@ class Drift360Reward:
             return
 
         reset = self.env.steps <= 1
+
         self.prev_yaw = torch.where(reset, torch.zeros_like(self.prev_yaw), self.prev_yaw)
         self.yaw_sum = torch.where(reset, torch.zeros_like(self.yaw_sum), self.yaw_sum)
         self.prev_yaw_abs = torch.where(reset, torch.zeros_like(self.prev_yaw_abs), self.prev_yaw_abs)
         self.initialized = torch.where(reset, torch.zeros_like(self.initialized), self.initialized)
+
         self.phase = torch.where(reset, torch.zeros_like(self.phase), self.phase)
         self.drift_steps = torch.where(reset, torch.zeros_like(self.drift_steps), self.drift_steps)
         self.recover_steps = torch.where(reset, torch.zeros_like(self.recover_steps), self.recover_steps)
+
         self.best_yaw_abs = torch.where(reset, torch.zeros_like(self.best_yaw_abs), self.best_yaw_abs)
+        self.finished_once = torch.where(reset, torch.zeros_like(self.finished_once), self.finished_once)
 
     def _straight_gate(self):
         batch_idx = self.env._batch_idx
@@ -96,15 +104,20 @@ class Drift360Reward:
             "reward": reward.detach().cpu().tolist(),
             "drift_steps": self.drift_steps.detach().cpu().tolist(),
             "recover_steps": self.recover_steps.detach().cpu().tolist(),
+            "finished_once": self.finished_once.detach().cpu().tolist(),
         }
 
     def _debug_print(self):
         if not self.debug or not hasattr(self.env, "steps"):
             return
+
         step = int(self.env.steps[0].item())
+
         if step % 50 != 0:
             return
+
         info = self.last_debug_info
+
         print(
             f"[REWARD] step={step:04d} | "
             f"phase={info['phase_name'][0]} | "
@@ -121,6 +134,7 @@ class Drift360Reward:
         old_phase = self.phase.clone()
 
         state = self.env.state
+
         yaw = state[:, 2]
         v_x = state[:, 3]
         v_y = state[:, 4]
@@ -143,11 +157,12 @@ class Drift360Reward:
         abs_delta = torch.abs(delta)
         abs_center = torch.abs(self.env.signed_dist_to_centerline)
         abs_heading = torch.abs(self.env.heading_diff)
+
         progress = self.env.progress / self.env.dt
         straight = self._straight_gate()
 
         # ------------------------------------------------------------
-        # DRIVE: ma się rozpędzić, ale nie dostawać za dużo za samą jazdę.
+        # DRIVE: rozpędzenie i trzymanie toru.
         # ------------------------------------------------------------
         drive_reward = (
             0.35 * progress
@@ -158,23 +173,29 @@ class Drift360Reward:
 
         start_drift = (
             (self.phase == self.DRIVE)
+            & (~self.finished_once)
             & straight
             & (speed > self.min_start_speed)
         )
 
-        self.phase = torch.where(start_drift, torch.ones_like(self.phase) * self.DRIFT, self.phase)
+        self.phase = torch.where(
+            start_drift,
+            torch.ones_like(self.phase) * self.DRIFT,
+            self.phase,
+        )
+
         self.yaw_sum = torch.where(start_drift, torch.zeros_like(self.yaw_sum), self.yaw_sum)
         self.prev_yaw_abs = torch.where(start_drift, torch.zeros_like(self.prev_yaw_abs), self.prev_yaw_abs)
         self.drift_steps = torch.where(start_drift, torch.zeros_like(self.drift_steps), self.drift_steps)
 
         # ------------------------------------------------------------
-        # DRIFT: najważniejsze jest ciągłe dokładanie yaw.
-        # Brak osobnej fazy INITIATE zmniejsza ryzyko, że model utknie
-        # w krótkich szarpnięciach zamiast wejść w długi poślizg.
+        # DRIFT: wykonanie jednego pełnego obrotu 360.
         # ------------------------------------------------------------
         in_drift = self.phase == self.DRIFT
+
         self.prev_yaw_abs = torch.where(in_drift, torch.abs(self.yaw_sum), self.prev_yaw_abs)
         self.yaw_sum = torch.where(in_drift, self.yaw_sum + dyaw, self.yaw_sum)
+
         yaw_abs = torch.abs(self.yaw_sum)
         self.best_yaw_abs = torch.maximum(self.best_yaw_abs, yaw_abs)
         self.drift_steps = torch.where(in_drift, self.drift_steps + 1, self.drift_steps)
@@ -182,11 +203,8 @@ class Drift360Reward:
         yaw_delta_abs = torch.relu(yaw_abs - self.prev_yaw_abs)
         yaw_frac = torch.clamp(yaw_abs / self.yaw_target, 0.0, 1.0)
 
-        # reward gęsty: każda kolejna porcja obrotu daje kasę,
-        # a im bliżej 360, tym większa wartość kolejnych stopni.
         yaw_reward = 30.0 * yaw_delta_abs * (1.0 + 2.0 * yaw_frac)
 
-        # nagroda za faktyczny poślizg boczny, ale bez zachęcania do stania w miejscu.
         beta_reward = 1.2 * torch.clamp(abs_beta - 0.08, 0.0, 0.7)
         rotation_reward = 0.45 * torch.clamp(abs_r, 0.0, 5.0)
         speed_keep_reward = 0.20 * torch.clamp(speed, 0.0, 8.0)
@@ -200,8 +218,34 @@ class Drift360Reward:
             - 0.015 * abs_delta
         )
 
-        # nie karz za mały progress tak mocno jak wcześniej, bo 360 naturalnie
-        # zmniejsza postęp wzdłuż toru. Karz głównie za niemal zatrzymanie.
+        late_drift = in_drift & (yaw_frac > 0.55)
+
+        strong_counter_reward = 0.25 * torch.clamp(
+            -delta * r,
+            0.0,
+            2.0,
+        )
+
+        drift_reward = torch.where(
+            late_drift,
+            drift_reward + strong_counter_reward,
+            drift_reward,
+        )
+
+        near_finish = in_drift & (yaw_frac > 0.85)
+
+        pre_recover_countersteer_reward = 0.20 * torch.clamp(
+            -delta * r,
+            0.0,
+            2.0,
+        )
+
+        drift_reward = torch.where(
+            near_finish,
+            drift_reward + pre_recover_countersteer_reward,
+            drift_reward,
+        )
+
         too_slow = in_drift & (self.drift_steps > 20) & (speed < self.min_drift_speed)
         drift_reward = torch.where(too_slow, drift_reward - 6.0, drift_reward)
 
@@ -211,19 +255,43 @@ class Drift360Reward:
         finished_drift = in_drift & (yaw_abs >= self.yaw_target)
         drift_reward = torch.where(finished_drift, drift_reward + 80.0, drift_reward)
 
-        self.phase = torch.where(finished_drift, torch.ones_like(self.phase) * self.RECOVER, self.phase)
-        self.phase = torch.where(failed_drift | too_slow, torch.zeros_like(self.phase), self.phase)
-        self.recover_steps = torch.where(finished_drift, torch.zeros_like(self.recover_steps), self.recover_steps)
+        self.phase = torch.where(
+            finished_drift,
+            torch.ones_like(self.phase) * self.RECOVER,
+            self.phase,
+        )
+
+        self.phase = torch.where(
+            failed_drift | too_slow,
+            torch.zeros_like(self.phase),
+            self.phase,
+        )
+
+        self.recover_steps = torch.where(
+            finished_drift,
+            torch.zeros_like(self.recover_steps),
+            self.recover_steps,
+        )
 
         # ------------------------------------------------------------
-        # RECOVER: wyprostuj i jedź dalej.
+        # RECOVER: wyprostowanie auta po pierwszym 360.
         # ------------------------------------------------------------
         in_recover = self.phase == self.RECOVER
         self.recover_steps = torch.where(in_recover, self.recover_steps + 1, self.recover_steps)
 
+        countersteer_reward = 0.30 * torch.clamp(
+            -delta * r,
+            0.0,
+            1.8,
+        )
+
+        spin_continue_penalty = 0.45 * abs_dyaw
+
         recover_reward = (
             0.80 * progress
             + 0.20 * torch.clamp(speed, 0.0, 8.0)
+            + countersteer_reward
+            - spin_continue_penalty
             - 0.90 * abs_heading
             - 0.55 * abs_r
             - 0.35 * abs_beta
@@ -238,26 +306,64 @@ class Drift360Reward:
             & (abs_beta < 0.25)
             & (speed > 2.0)
         )
+
         failed_recover = in_recover & (self.recover_steps > self.max_recover_steps)
 
         recover_reward = torch.where(stable, recover_reward + 35.0, recover_reward)
         recover_reward = torch.where(failed_recover, recover_reward - 8.0, recover_reward)
 
-        self.phase = torch.where(stable | failed_recover, torch.zeros_like(self.phase), self.phase)
+        self.finished_once = torch.where(
+            stable,
+            torch.ones_like(self.finished_once),
+            self.finished_once,
+        )
 
-        reset = failed_drift | too_slow | stable | failed_recover
+        self.phase = torch.where(
+            stable,
+            torch.ones_like(self.phase) * self.FINISH,
+            self.phase,
+        )
+
+        self.phase = torch.where(
+            failed_recover,
+            torch.zeros_like(self.phase),
+            self.phase,
+        )
+
+        reset = failed_drift | too_slow | failed_recover
+
         self.yaw_sum = torch.where(reset, torch.zeros_like(self.yaw_sum), self.yaw_sum)
         self.prev_yaw_abs = torch.where(reset, torch.zeros_like(self.prev_yaw_abs), self.prev_yaw_abs)
         self.drift_steps = torch.where(reset, torch.zeros_like(self.drift_steps), self.drift_steps)
         self.recover_steps = torch.where(reset, torch.zeros_like(self.recover_steps), self.recover_steps)
 
+        # ------------------------------------------------------------
+        # FINISH: po pierwszym 360 jedź po torze do końca epizodu.
+        # ------------------------------------------------------------
+        in_finish = self.phase == self.FINISH
+
+        finish_reward = (
+            1.00 * progress
+            + 0.25 * torch.clamp(speed, 0.0, 8.0)
+            - 0.90 * abs_heading
+            - 0.40 * abs_center
+            - 0.45 * abs_beta
+            - 0.35 * abs_r
+            - 0.08 * abs_delta
+        )
+
+        # ------------------------------------------------------------
+        # Wybór rewardu według fazy.
+        # ------------------------------------------------------------
         reward = torch.where(in_drift, drift_reward, drive_reward)
         reward = torch.where(in_recover, recover_reward, reward)
+        reward = torch.where(in_finish, finish_reward, reward)
 
         reward = torch.where(self.env.slightly_off_track, reward - 2.0, reward)
         reward = torch.where(self.env.off_track, torch.ones_like(reward) * -30.0, reward)
 
         reward = reward / 10.0
+
         self._save_debug_info(speed, beta, r, dyaw, progress, reward)
         self._debug_print()
 
@@ -266,7 +372,8 @@ class Drift360Reward:
                 i = int(idx.item())
                 print(
                     f"[PHASE] env={i} "
-                    f"{self.PHASE_NAMES[int(old_phase[i].item())]} -> {self.PHASE_NAMES[int(self.phase[i].item())]} | "
+                    f"{self.PHASE_NAMES[int(old_phase[i].item())]} -> "
+                    f"{self.PHASE_NAMES[int(self.phase[i].item())]} | "
                     f"yaw={self.last_debug_info['yaw_deg'][i]:.1f} deg | "
                     f"best={self.last_debug_info['best_yaw_deg'][i]:.1f} deg | "
                     f"v={self.last_debug_info['speed'][i]:.2f} | "

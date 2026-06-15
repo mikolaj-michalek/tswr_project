@@ -4,15 +4,11 @@ import os
 
 DST = "racetrack/racetrack/tracks/ml_wide_playground.csv"
 
-# mały obwód centerline, duża szerokość robi plac
 WIDTH = 12.0
 HEIGHT = 12.0
 RADIUS = 2.0
-
 N_STRAIGHT = 35
 N_ARC = 20
-
-# realnie daje ogromny obszar wokół całej pętli
 HALF_WIDTH = 18.0
 
 
